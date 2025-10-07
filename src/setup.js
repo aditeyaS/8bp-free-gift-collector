@@ -6,7 +6,7 @@ import { logger } from "./logger.js";
 
 const rl = readline.createInterface({ input, output });
 
-logger("success", "Enter your 8 ball pool unique id (Eg: 4722012226)");
+logger("success", "Enter your 8 ball pool unique id also for new user (Eg: 4722012226)");
 const userUniqueID = await rl.question("");
 rl.close();
 
