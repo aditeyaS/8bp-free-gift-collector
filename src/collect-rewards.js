@@ -12,10 +12,14 @@ import { makeRewardData } from "./utils.js";
 export const collectRewards = async (userUniqueID) => {
   const pageUrl = "https://8ballpool.com/en/shop";
   const delay = 100;
+  const BROWSER_ARGS = ["--no-sandbox", "--disable-setuid-sandbox"];
+  const TIMEOUT = 15000;
+
+  logger("debug", "🚀 Launching browser...");
   const browser = await puppeteer.launch({
     headless: true,
     slowMo: delay,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: BROWSER_ARGS,
   });
   const page = await browser.newPage();
   await page.setUserAgent(
@@ -24,32 +28,56 @@ export const collectRewards = async (userUniqueID) => {
 
   logger("info", `🌐 Navigating to ${pageUrl}`);
   await page.goto(pageUrl, { waitUntil: "networkidle2" });
+  logger("debug", `✅ Navigation complete, waiting for login button.`);
 
+  const LOGIN_SELECTOR = 'xpath//html/body/div[1]/div/div[1]/div/div[2]/header/div[3]/div/button[1]';
+  logger("debug", `⏳ Waiting for selector: ${LOGIN_SELECTOR} (Timeout: ${TIMEOUT}ms)`);
+  
   const loginButton = await page.waitForSelector(
-    'button[data-testid="btn-login-modal"]',
-    { visible: true }
+    LOGIN_SELECTOR,
+    { visible: true, timeout: TIMEOUT }
   );
+
   if (loginButton) {
+    logger("debug", "🔍 Login button found, clicking.");
     await loginButton.click();
-    await page.type('input[data-testid="input-unique-id"]', userUniqueID, {
+    
+    // Campo de Input
+    const INPUT_ID_SELECTOR = 'xpath//html/body/div[1]/div/div[2]/div/div[2]/div/div/div/div/form/div[2]/div[1]/input';
+    logger("debug", `⏳ Waiting for input selector: ${INPUT_ID_SELECTOR} (Timeout: ${TIMEOUT}ms)`);
+    
+    await page.waitForSelector(INPUT_ID_SELECTOR, { visible: true, timeout: TIMEOUT });
+    
+    await page.type(INPUT_ID_SELECTOR, userUniqueID, {
       delay,
     });
+    
+    // ATUALIZADO: Usando o novo XPath absoluto para o botão "Go"
+    const GO_SELECTOR = 'xpath//html/body/div[1]/div/div[2]/div/div[2]/div/div/div/div/form/div[2]/div[2]/button';
+    logger("debug", `⏳ Waiting for selector: ${GO_SELECTOR}`);
+    
     const goButton = await page.waitForSelector(
-      'button[data-testid="btn-user-go"]'
+      GO_SELECTOR,
+      { visible: true, timeout: TIMEOUT }
     );
     await goButton.click();
     logger("success", "✅ User logged in.");
   } else {
+    logger("error", "❌ Login button not found.");
     throw new Error("Unable to login.");
   }
 
   let rewards = [];
-  const products = await page.$$(".product-list-item");
+  const PRODUCTS_SELECTOR = ".product-list-item";
+  logger("debug", `🔍 Searching for products with selector: ${PRODUCTS_SELECTOR}`);
+  const products = await page.$$(PRODUCTS_SELECTOR);
   const N = products.length;
 
   logger("info", `💡 ${N} products found.`);
 
   for (const [index, product] of products.entries()) {
+    logger("debug", `➡️ Processing product [${index + 1}/${N}]`);
+    
     const priceButton = await product.$("button");
     const price = await priceButton.evaluate((el) =>
       el.textContent.trim().toUpperCase()
@@ -64,8 +92,9 @@ export const collectRewards = async (userUniqueID) => {
     const quantityElement = await product.$(".amount-text");
 
     let quantity = "";
-    if (quantityElement)
+    if (quantityElement) {
       quantity = await quantityElement.evaluate((el) => el.textContent.trim());
+    }
 
     logger("info", `🚲 [${index + 1}/${N}] ${price} ${name}`);
 
@@ -74,13 +103,18 @@ export const collectRewards = async (userUniqueID) => {
       await priceButton.click();
       rewards.push(makeRewardData(imageSrc, name, quantity));
       logger("success", `🎉 Claimed: [${index + 1}/${N}]`);
+    } else {
+      logger("debug", `💰 Product [${index + 1}/${N}] skipped. Price: ${price}`);
     }
   }
 
   await browser.close();
   logger("info", "❎ Browser closed.");
 
-  if (rewards.length === 0) throw new Error("No rewards found");
+  if (rewards.length === 0) {
+    logger("warn", "⚠️ No free rewards found.");
+    throw new Error("No rewards found");
+  }
 
   return rewards;
 };
